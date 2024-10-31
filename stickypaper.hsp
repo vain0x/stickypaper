@@ -1,0 +1,173 @@
+; SPDX-License-Identifier: CC0-1.0
+
+#packopt name "stickypaper"
+#packopt hide 1
+
+#include "encode.as"
+
+; Win32 API の定数
+; @seealso http://lhsp.s206.xrea.com/hsp_object2.html (edit control change handling)
+#const WM_COMMAND 0x0111
+#const EN_CHANGE 0x0300
+#define ctype HIWORD(%1) ((%1) >> 16 & 0xFFFF)
+
+; Timer
+; @seealso http://chokuto.ifdef.jp/advanced/usertimer.html
+#uselib "user32.dll"
+#func SetTimer  "SetTimer"  int,int,int,int
+#func KillTimer "KillTimer" int,int
+#define WM_TIMER 0x0113
+#define TIMER_ID 1
+
+#const wid_paper 2
+
+; ================================================
+
+	filename = dir_cmdline
+	if filename == "" {
+		filename = dir_cur + "\\message.txt"
+	}
+	filename_backup = filename + ".orig"
+	sdim text_buf, 0x7FFF
+
+	; ファイルを読み込む
+	; (なければ作成する)
+	exist filename
+	if strsize < 0 {
+		dialog strf("保存先のファイル \"%s\" がみつかりません。作成しますか", filename), 2, "stickypaper"
+		if stat != 6 : end
+
+		logmes "create: " + filename
+		bsave filename, data, 0
+	}
+
+	exist filename
+	sdim text_raw, strsize + 1
+	bload filename, text_raw, strsize
+	text_buf = utf8n2sjis(text_raw)
+
+	; メインウィンドウを作る
+	; 2: hidden
+	bgscr wid_paper, 600, 600, 2
+	width , , ginfo_dispx - ginfo_sizex, 0
+	title "stickypaper"
+
+	font "BIZ UDGothic", 14
+	hsvcolor 120, 0x07, 0xFC
+	objmode objmode_usecolor | objmode_usefont
+	mesbox text_buf, ginfo_winx, ginfo_winy, 1 ; 1: multiline
+	mesbox_id = stat
+	mesbox_hwnd = objinfo_hwnd(mesbox_id)
+
+	oncmd gosub *on_command, WM_COMMAND
+	oncmd gosub *on_timer, WM_TIMER
+	onexit goto *on_exit
+
+	; 1: show
+	gsel wid_paper, 1
+	stop
+
+; ================================================
+
+; WM_COMMAND
+*on_command
+
+	if lparam == mesbox_hwnd {
+		if HIWORD(wparam) == EN_CHANGE {
+			logmes "Changed"
+			gosub *l_notify_debounce
+		}
+	}
+	return
+
+; WM_TIMER
+*on_timer
+
+	if wparam == TIMER_ID {
+		; デバウンスが完了したとき保存を行う
+		gosub *l_save
+		gosub *l_dispose_debounce
+	}
+	return
+
+*on_exit
+
+	; デバウンス中ならタイマーをキャンセルし、保存を行う
+	if is_timer_set {
+		gosub *l_dispose_debounce
+		gosub *l_save
+	}
+
+	end
+
+*l_save
+
+	logmes "Saving..."
+	bcopy filename, filename_backup
+
+	text_buf = strtrim(text_buf) + "\n"
+	sjis2utf8n text_raw, text_buf
+	notesel text_raw
+	notesave filename
+	noteunsel
+	return
+
+; ------------------------------------------------
+; デバウンス
+; ------------------------------------------------
+
+; (最後に変更が行われてから一定時間経過したら保存を行う)
+
+*l_notify_debounce
+
+	if is_timer_set {
+		gosub *l_dispose_debounce
+	}
+
+	SetTimer hwnd, TIMER_ID, 3000 ; 3000: 3秒
+	if stat == 0 {
+		dialog "SetTimer error", 1, "stickypaper" ; 1: warning
+		return
+	}
+	is_timer_set = 1
+	return
+
+*l_dispose_debounce
+
+	if is_timer_set {
+		KillTimer hwnd, TIMER_ID
+		is_timer_set = 0
+	}
+	return
+
+; ================================================
+
+#module
+
+; 指定したディレクトリがなければ作る
+#deffunc mkdir_p str filename, \
+	local fn, local segments, local dn, local files
+
+	sdim files
+
+	fn = getpath(filename, 32) ; 32: dirname
+	strrep fn, "\\", "/"
+	split fn, "/", segments
+
+	dn = segments(0) ; dn = directory name
+
+	repeat length(segments)
+		if cnt == 0 || segments(cnt) == "" : continue
+
+		dn += "/"
+		dn += segments(cnt)
+
+		dirlist files, dn, 5 ; 5: only directories
+		if stat == 0 {
+			logmes "mkdir: " + dn
+			mkdir dn
+		}
+	loop
+	return
+
+#global
