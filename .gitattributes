@@ -1,1 +1,5 @@
 * text=auto eol=lf
+
+*.as working-tree-encoding=cp932 linguist-language=hsp3
+*.hs working-tree-encoding=cp932 linguist-language=txt
+*.hsp working-tree-encoding=cp932 linguist-language=hsp3
